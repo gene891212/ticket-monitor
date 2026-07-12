@@ -22,3 +22,14 @@ CREATE TABLE IF NOT EXISTS subscription_sessions (
   PRIMARY KEY (subscription_id, session_key),
   FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
 );
+
+CREATE TABLE IF NOT EXISTS manual_check_requests (
+  id TEXT PRIMARY KEY,
+  subscription_id TEXT NOT NULL,
+  line_user_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  claimed_at TEXT,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS manual_check_requests_pending_idx ON manual_check_requests(status, created_at);

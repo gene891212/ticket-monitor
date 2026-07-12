@@ -20,6 +20,9 @@ async function saveReport(request, env, subscriptionId) {
   const subscription = await env.DB.prepare('SELECT line_user_id,event_url FROM subscriptions WHERE id=? AND enabled=1').bind(subscriptionId).first();
   if (!subscription) return response('Not found', 404);
   const report = await request.json();
+  const manual = report.manualRequestId
+    ? await env.DB.prepare("SELECT id,line_user_id FROM manual_check_requests WHERE id=? AND subscription_id=? AND status='claimed'").bind(report.manualRequestId, subscriptionId).first()
+    : null;
   const newlyAvailable = [];
   for (const session of report.sessions ?? []) {
     const old = await env.DB.prepare('SELECT last_notified_status FROM subscription_sessions WHERE subscription_id=? AND session_key=?').bind(subscriptionId, session.key).first();
@@ -30,17 +33,27 @@ async function saveReport(request, env, subscriptionId) {
         updated_at=CURRENT_TIMESTAMP`).bind(subscriptionId, session.key, session.dateTime, session.name, session.venue, session.status, null).run();
     if (session.status === 'available' && old?.last_notified_status !== 'available') newlyAvailable.push(session);
   }
-  if (newlyAvailable.length) {
+  if (newlyAvailable.length && !manual) {
     const title = report.eventName ?? newlyAvailable[0].name;
     const details = newlyAvailable.map((item) => `• ${item.dateTime}｜${item.venue}`).join('\n');
     await line(env, 'push', { to: subscription.line_user_id, messages: [{ type: 'text', text: `🎫 有可購買場次\n${title}\n${details}\n\n前往購票：${subscription.event_url}` }] });
     await env.DB.batch(newlyAvailable.map((item) => env.DB.prepare('UPDATE subscription_sessions SET last_notified_status=? WHERE subscription_id=? AND session_key=?').bind('available', subscriptionId, item.key)));
   }
+  if (manual) {
+    const available = (report.sessions ?? []).filter((item) => item.status === 'available');
+    const title = report.eventName ?? report.sessions?.[0]?.name ?? '活動';
+    const resultText = available.length
+      ? `🔎 手動檢查完成\n${title}\n${available.map((item) => `• ${item.dateTime}｜${item.venue}`).join('\n')}\n\n目前有可購買場次：${subscription.event_url}`
+      : `🔎 手動檢查完成\n${title}\n目前沒有可購買場次。`;
+    await line(env, 'push', { to: manual.line_user_id, messages: [{ type: 'text', text: resultText }] });
+    if (available.length) await env.DB.batch(available.map((item) => env.DB.prepare('UPDATE subscription_sessions SET last_notified_status=? WHERE subscription_id=? AND session_key=?').bind('available', subscriptionId, item.key)));
+    await env.DB.prepare("UPDATE manual_check_requests SET status='completed',completed_at=CURRENT_TIMESTAMP WHERE id=?").bind(manual.id).run();
+  }
   return json({ notified: newlyAvailable.length });
 }
 
 async function command(env, userId, value) {
-  const help = '指令：\n訂閱 <Tixcraft URL>\n我的訂閱\n取消 <訂閱 ID>';
+  const help = '指令：\n訂閱 <Tixcraft URL>\n我的訂閱\n立即檢查 <訂閱 ID>\n取消 <訂閱 ID>';
   if (/^(help|說明|幫助)$/i.test(value)) return help;
   if (value === '我的訂閱') {
     const { results } = await env.DB.prepare('SELECT id,event_name,event_url FROM subscriptions WHERE line_user_id=? AND enabled=1 ORDER BY created_at DESC').bind(userId).all();
@@ -58,6 +71,15 @@ async function command(env, userId, value) {
     await env.DB.prepare("INSERT INTO subscriptions (id,line_user_id,provider,event_url) VALUES (?,?,'tixcraft',?) ON CONFLICT(line_user_id,event_url) DO UPDATE SET enabled=1,updated_at=CURRENT_TIMESTAMP").bind(id, userId, eventUrl).run();
     return `已開始監控。\n訂閱 ID：${id}`;
   }
+  if (value.startsWith('立即檢查 ')) {
+    const subscriptionId = value.slice(5).trim();
+    const subscription = await env.DB.prepare('SELECT id FROM subscriptions WHERE id=? AND line_user_id=? AND enabled=1').bind(subscriptionId, userId).first();
+    if (!subscription) return '找不到啟用中的訂閱 ID。';
+    const recent = await env.DB.prepare("SELECT id FROM manual_check_requests WHERE subscription_id=? AND line_user_id=? AND status IN ('pending','claimed') AND created_at > datetime('now','-60 seconds')").bind(subscriptionId, userId).first();
+    if (recent) return '這個訂閱剛剛已送出檢查請求，請稍候。';
+    await env.DB.prepare('INSERT INTO manual_check_requests (id,subscription_id,line_user_id) VALUES (?,?,?)').bind(crypto.randomUUID(), subscriptionId, userId).run();
+    return '已送出手動檢查請求，約 15 秒內會收到結果。';
+  }
   return '輸入「說明」查看指令。';
 }
 
@@ -68,6 +90,23 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/subscriptions') {
       if (!authorized(request, env)) return response('Unauthorized', 401);
       const { results } = await env.DB.prepare('SELECT id,provider,event_url FROM subscriptions WHERE enabled=1').all(); return json(results);
+    }
+    if (request.method === 'POST' && url.pathname === '/api/manual-checks/claim') {
+      if (!authorized(request, env)) return response('Unauthorized', 401);
+      await env.DB.prepare("UPDATE manual_check_requests SET status='pending',claimed_at=NULL WHERE status='claimed' AND claimed_at < datetime('now','-2 minutes')").run();
+      const { results } = await env.DB.prepare("SELECT r.id,r.subscription_id AS subscriptionId,s.provider,s.event_url AS eventUrl,r.line_user_id AS lineUserId FROM manual_check_requests r JOIN subscriptions s ON s.id=r.subscription_id WHERE r.status='pending' AND s.enabled=1 ORDER BY r.created_at LIMIT 10").all();
+      if (results.length) await env.DB.batch(results.map((item) => env.DB.prepare("UPDATE manual_check_requests SET status='claimed',claimed_at=CURRENT_TIMESTAMP WHERE id=?").bind(item.id)));
+      return json(results);
+    }
+    const failMatch = url.pathname.match(/^\/api\/manual-checks\/([^/]+)\/fail$/);
+    if (request.method === 'POST' && failMatch) {
+      if (!authorized(request, env)) return response('Unauthorized', 401);
+      const item = await env.DB.prepare("SELECT line_user_id FROM manual_check_requests WHERE id=? AND status='claimed'").bind(failMatch[1]).first();
+      if (item) {
+        await env.DB.prepare("UPDATE manual_check_requests SET status='failed',completed_at=CURRENT_TIMESTAMP WHERE id=?").bind(failMatch[1]).run();
+        await line(env, 'push', { to: item.line_user_id, messages: [{ type: 'text', text: '手動檢查失敗，請稍後再試。' }] });
+      }
+      return json({ ok: true });
     }
     const reportMatch = url.pathname.match(/^\/api\/subscriptions\/([^/]+)\/sessions$/);
     if (request.method === 'POST' && reportMatch) return saveReport(request, env, reportMatch[1]);

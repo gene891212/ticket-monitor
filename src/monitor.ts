@@ -1,5 +1,5 @@
 import { providerFor } from './providers/registry.js';
-import { activeSubscriptions, reportSessions } from './worker-client.js';
+import { activeSubscriptions, claimManualChecks, failManualCheck, reportSessions } from './worker-client.js';
 
 let running = false;
 
@@ -21,5 +21,19 @@ export async function poll() {
     }
   } finally {
     running = false;
+  }
+}
+
+export async function pollManual() {
+  for (const request of await claimManualChecks()) {
+    try {
+      const provider = providerFor(request.eventUrl);
+      if (!provider) throw new Error('Unsupported provider');
+      const result = await provider.check(request.eventUrl);
+      await reportSessions(request.subscriptionId, result, request.id);
+    } catch (error) {
+      console.error('manual check failed', request.id, error);
+      await failManualCheck(request.id);
+    }
   }
 }
