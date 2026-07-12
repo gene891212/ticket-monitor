@@ -1,0 +1,12 @@
+{
+  "name": "ticket-monitor-webhook",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-12",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ticket-monitor",
+      "database_id": "3ae156cb-a4a7-4aad-95e0-d9474ab3c1a1"
+    }
+  ]
+}
