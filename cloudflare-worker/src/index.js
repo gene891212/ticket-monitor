@@ -56,8 +56,51 @@ async function command(env, userId, value) {
   const help = '指令：\n訂閱 <Tixcraft URL>\n我的訂閱\n立即檢查 <訂閱 ID>\n取消 <訂閱 ID>';
   if (/^(help|說明|幫助)$/i.test(value)) return help;
   if (value === '我的訂閱') {
-    const { results } = await env.DB.prepare('SELECT id,event_name,event_url FROM subscriptions WHERE line_user_id=? AND enabled=1 ORDER BY created_at DESC').bind(userId).all();
-    return results.length ? results.map((v) => `# ${v.id}\n${v.event_name || v.event_url}`).join('\n\n') : '目前沒有訂閱。';
+    const { results } = await env.DB.prepare(`
+      SELECT s.id, s.event_name, s.event_url, ss.session_date_time, ss.session_name, ss.session_venue, ss.last_status
+      FROM subscriptions s
+      LEFT JOIN subscription_sessions ss ON s.id = ss.subscription_id
+      WHERE s.line_user_id = ? AND s.enabled = 1
+      ORDER BY s.created_at DESC, ss.session_date_time ASC
+    `).bind(userId).all();
+
+    if (!results || !results.length) return '目前沒有訂閱。';
+
+    const subsMap = new Map();
+    for (const row of results) {
+      if (!subsMap.has(row.id)) {
+        subsMap.set(row.id, {
+          id: row.id,
+          eventName: row.event_name,
+          eventUrl: row.event_url,
+          sessions: []
+        });
+      }
+      if (row.session_date_time) {
+        subsMap.get(row.id).sessions.push({
+          dateTime: row.session_date_time,
+          name: row.session_name,
+          venue: row.session_venue,
+          status: row.last_status
+        });
+      }
+    }
+
+    const messages = [];
+    for (const sub of subsMap.values()) {
+      let subStr = `# ${sub.id}\n${sub.eventName || sub.eventUrl}`;
+      if (sub.sessions.length) {
+        const sessionLines = sub.sessions.map((s) => {
+          const statusIcon = s.status === 'available' ? '🟢 有票' : s.status === 'unavailable' ? '❌ 售完' : '❓ 未知';
+          return `• ${s.dateTime}｜${s.venue}：${statusIcon}`;
+        });
+        subStr += '\n' + sessionLines.join('\n');
+      } else {
+        subStr += '\n（尚未取得場次狀態，請稍候或執行立即檢查）';
+      }
+      messages.push(subStr);
+    }
+    return messages.join('\n\n');
   }
   if (value.startsWith('取消 ')) {
     const r = await env.DB.prepare('UPDATE subscriptions SET enabled=0,updated_at=CURRENT_TIMESTAMP WHERE id=? AND line_user_id=?').bind(value.slice(3).trim(), userId).run();
