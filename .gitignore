@@ -3,3 +3,6 @@ dist/
 .env
 .playwright-cli/
 .pnpm-store/
+scratch/screenshots*/
+scratch/**/*.png
+
