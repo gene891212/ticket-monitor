@@ -11,7 +11,11 @@ async function signature(raw, value, secret) {
 }
 async function line(env, path, body) {
   const r = await fetch(`${API}/${path}`, { method: 'POST', headers: { authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error(`LINE API HTTP ${r.status}`);
+  if (!r.ok) {
+    const detail = await r.text().catch(() => '');
+    console.error(`[LINE API] ${path} HTTP ${r.status}`, detail);
+    throw new Error(`LINE API HTTP ${r.status}: ${detail}`);
+  }
 }
 function isTixcraft(value) { try { return new URL(value).hostname.endsWith('tixcraft.com'); } catch { return false; } }
 
@@ -31,11 +35,15 @@ async function saveReport(request, env, subscriptionId) {
         session_date_time=excluded.session_date_time,session_name=excluded.session_name,session_venue=excluded.session_venue,last_status=excluded.last_status,
         last_notified_status=CASE WHEN excluded.last_status='available' THEN subscription_sessions.last_notified_status ELSE excluded.last_status END,
         updated_at=CURRENT_TIMESTAMP`).bind(subscriptionId, session.key, session.dateTime, session.name, session.venue, session.status, null).run();
-    if (session.status === 'available' && old?.last_notified_status !== 'available') newlyAvailable.push(session);
+    if (session.status === 'available' && old?.last_notified_status !== 'available') {
+      console.log('[STATE] session will trigger push', JSON.stringify({ subscriptionId, sessionKey: session.key, newStatus: session.status, oldNotified: old?.last_notified_status ?? null, isNewRecord: !old }));
+      newlyAvailable.push(session);
+    }
   }
   if (newlyAvailable.length && !manual) {
     const title = report.eventName ?? newlyAvailable[0].name;
     const details = newlyAvailable.map((item) => `• ${item.dateTime}｜${item.venue}`).join('\n');
+    console.log('[PUSH] auto_available', JSON.stringify({ subscriptionId, userId: subscription.line_user_id, sessions: newlyAvailable.map((s) => ({ key: s.key, dateTime: s.dateTime })) }));
     await line(env, 'push', { to: subscription.line_user_id, messages: [{ type: 'text', text: `🎫 有可購買場次\n${title}\n${details}\n\n前往購票：${subscription.event_url}` }] });
     await env.DB.batch(newlyAvailable.map((item) => env.DB.prepare('UPDATE subscription_sessions SET last_notified_status=? WHERE subscription_id=? AND session_key=?').bind('available', subscriptionId, item.key)));
   }
@@ -53,6 +61,7 @@ async function saveReport(request, env, subscriptionId) {
         await line(env, 'push', { to: manual.line_user_id, messages: [{ type: 'text', text: resultText }] });
       }
     } else {
+      console.warn('[PUSH] manual_no_reply_token', JSON.stringify({ manualId: manual.id, subscriptionId, userId: manual.line_user_id }));
       await line(env, 'push', { to: manual.line_user_id, messages: [{ type: 'text', text: resultText }] });
     }
     if (available.length) await env.DB.batch(available.map((item) => env.DB.prepare('UPDATE subscription_sessions SET last_notified_status=? WHERE subscription_id=? AND session_key=?').bind('available', subscriptionId, item.key)));
@@ -177,6 +186,7 @@ export default {
               await line(env, 'push', { to: item.line_user_id, messages: [{ type: 'text', text: failText }] });
             }
           } else {
+            console.warn('[PUSH] fail_no_reply_token', JSON.stringify({ manualId: failMatch[1], userId: item.line_user_id }));
             await line(env, 'push', { to: item.line_user_id, messages: [{ type: 'text', text: failText }] });
           }
         }
@@ -197,6 +207,7 @@ export default {
       }));
       return response('OK');
     } catch (err) {
+      console.error('[WORKER ERROR]', err.message, err.stack);
       return json({ error: err.message, stack: err.stack }, 500);
     }
   }
