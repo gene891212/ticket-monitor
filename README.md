@@ -52,15 +52,14 @@ sequenceDiagram
         end
     end
 
-    %% 手動檢查流程
-    Note over User, Worker: 【3. 手動檢查流程】
+    %% 手動檢查流程 (非同步 Reply 節能設計)
+    Note over User, Worker: 【3. 手動檢查流程 (非同步 Reply 節能設計)】
     User->>LINE: 發送訊息「立即檢查 <訂閱 ID>」
     LINE->>Worker: Webhook (POST /webhook/line)
-    Worker->>Worker: 寫入 manual_check_requests 表 (狀態為 pending)
-    Worker-->>LINE: 回傳「已送出請求，15 秒內會收到結果」
-    LINE-->>User: 顯示提示
+    Worker->>Worker: 寫入 D1 資料庫，將 replyToken 存入 manual_check_requests 表
+    Worker-->>LINE: (HTTP 200 OK) 刻意不立即回覆，以保留該 replyToken
 
-    rect rgb(240, 240, 240)
+    loop
         Note over Runner, Worker: Local Runner 輪詢手動請求 (每 15 秒)
         Runner->>Worker: POST /api/manual-checks/claim (領取任務)
         Worker->>Worker: 標記狀態為 claimed，並回傳任務內容
@@ -69,8 +68,13 @@ sequenceDiagram
         Web-->>Runner: 返回網頁內容
         Runner->>Worker: POST /api/subscriptions/:id/sessions (攜帶 manualRequestId)
         Worker->>Worker: 寫入/更新場次，並更新 manual_check_requests 為 completed
-        Worker->>LINE: LINE Push API (回報手動檢查結果)
-        LINE-->>User: 🔎 收到最新手動檢查結果！
+        alt replyToken 未超時 (約 40 秒內)
+            Worker->>LINE: LINE Reply API (使用保留的 replyToken 回覆結果)
+            LINE-->>User: 🔎 收到手動檢查結果！(免費)
+        else replyToken 超時失效
+            Worker->>LINE: LINE Push API (降級回推播發送)
+            LINE-->>User: 🔎 收到手動檢查結果！(扣除推播額度)
+        end
     end
 ```
 

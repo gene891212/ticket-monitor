@@ -15,10 +15,17 @@ function headers() {
   return { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
 }
 
+async function checkResponse(response: Response, context: string) {
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Worker returned HTTP ${response.status} while ${context}. Details: ${body}`);
+  }
+}
+
 export async function activeSubscriptions(): Promise<RemoteSubscription[]> {
   if (!baseUrl) throw new Error('CLOUDFLARE_WORKER_URL is required');
   const response = await fetch(`${baseUrl}/api/subscriptions`, { headers: headers(), signal: AbortSignal.timeout(15_000) });
-  if (!response.ok) throw new Error(`Worker returned HTTP ${response.status} while listing subscriptions`);
+  await checkResponse(response, 'listing subscriptions');
   return response.json() as Promise<RemoteSubscription[]>;
 }
 
@@ -28,20 +35,20 @@ export async function reportSessions(subscriptionId: string, result: CheckResult
     method: 'POST', headers: headers(), signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({ eventName: result.eventName, sessions: result.sessions ?? [], manualRequestId }),
   });
-  if (!response.ok) throw new Error(`Worker returned HTTP ${response.status} while reporting sessions`);
+  await checkResponse(response, 'reporting sessions');
   return response.json() as Promise<{ notified: number }>;
 }
 
 export async function failManualCheck(id: string) {
   if (!baseUrl) throw new Error('CLOUDFLARE_WORKER_URL is required');
   const response = await fetch(`${baseUrl}/api/manual-checks/${id}/fail`, { method: 'POST', headers: headers(), signal: AbortSignal.timeout(15_000) });
-  if (!response.ok) throw new Error(`Worker returned HTTP ${response.status} while failing manual check`);
+  await checkResponse(response, 'failing manual check');
 }
 
 export interface ManualCheck { id: string; subscriptionId: string; provider: Provider; eventUrl: string; }
 export async function claimManualChecks(): Promise<ManualCheck[]> {
   if (!baseUrl) throw new Error('CLOUDFLARE_WORKER_URL is required');
   const response = await fetch(`${baseUrl}/api/manual-checks/claim`, { method: 'POST', headers: headers(), signal: AbortSignal.timeout(15_000) });
-  if (!response.ok) throw new Error(`Worker returned HTTP ${response.status} while claiming manual checks`);
+  await checkResponse(response, 'claiming manual checks');
   return response.json() as Promise<ManualCheck[]>;
 }
