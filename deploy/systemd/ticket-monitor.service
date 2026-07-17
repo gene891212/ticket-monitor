@@ -1,0 +1,19 @@
+[Unit]
+Description=Ticket Monitor
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=j41215
+Group=j41215
+WorkingDirectory=/home/j41215/Documents/ticket-monitor
+ExecStart=/usr/bin/node /home/j41215/Documents/ticket-monitor/dist/index.js
+Restart=on-failure
+RestartSec=10
+Environment=NODE_ENV=production
+# Keep this explicit so Playwright uses the browser installed for this account.
+Environment=PLAYWRIGHT_BROWSERS_PATH=/home/j41215/.cache/ms-playwright
+
+[Install]
+WantedBy=multi-user.target
