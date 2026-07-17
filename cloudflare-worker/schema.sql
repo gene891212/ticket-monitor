@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS manual_check_requests (
   id TEXT PRIMARY KEY,
   subscription_id TEXT NOT NULL,
   line_user_id TEXT NOT NULL,
+  reply_token TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   claimed_at TEXT,

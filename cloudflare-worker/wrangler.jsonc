@@ -2,6 +2,12 @@
   "name": "ticket-monitor-webhook",
   "main": "src/index.js",
   "compatibility_date": "2026-07-12",
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  },
   "d1_databases": [
     {
       "binding": "DB",

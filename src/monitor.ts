@@ -52,6 +52,8 @@ export async function poll() {
         console.error('monitor check failed', subscription.id, error);
       }
     }
+  } catch (error) {
+    console.error('monitor poll tick failed', error);
   } finally {
     running = false;
   }
