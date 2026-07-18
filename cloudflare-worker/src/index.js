@@ -18,6 +18,7 @@ async function line(env, path, body) {
   }
 }
 function isTixcraft(value) { try { return new URL(value).hostname.endsWith('tixcraft.com'); } catch { return false; } }
+function isTicketplus(value) { try { const url = new URL(value); return url.hostname === 'ticketplus.com.tw' || url.hostname.endsWith('.ticketplus.com.tw'); } catch { return false; } }
 
 async function saveReport(request, env, subscriptionId) {
   if (!authorized(request, env)) return response('Unauthorized', 401);
@@ -71,7 +72,7 @@ async function saveReport(request, env, subscriptionId) {
 }
 
 async function command(env, userId, value, replyToken) {
-  const help = '指令：\n訂閱 <Tixcraft URL>\n我的訂閱\n立即檢查 <訂閱 ID>\n取消 <訂閱 ID>';
+  const help = '指令：\n訂閱 <活動網址>\n我的訂閱\n立即檢查 <訂閱 ID>\n取消 <訂閱 ID>';
   if (/^(help|說明|幫助)$/i.test(value)) return help;
   if (value === '我的訂閱') {
     const { results } = await env.DB.prepare(`
@@ -126,21 +127,40 @@ async function command(env, userId, value, replyToken) {
   }
   if (value.startsWith('訂閱 ')) {
     const eventUrl = value.slice(3).trim();
-    if (!isTixcraft(eventUrl)) return '請提供有效的 Tixcraft 活動網址。';
+    let provider = '';
+    if (isTixcraft(eventUrl)) {
+      provider = 'tixcraft';
+    } else if (isTicketplus(eventUrl)) {
+      provider = 'ticketplus';
+    } else {
+      return '請提供有效的 tixCraft 或 TicketPlus 活動網址。';
+    }
+
     let normalizedUrl = eventUrl;
     try {
       const parsed = new URL(eventUrl);
-      const match = parsed.pathname.match(/^\/activity\/(?:detail|game)\/([^/]+)$/i);
-      if (match) {
-        parsed.pathname = `/activity/game/${match[1]}`;
-        parsed.search = '';
-        parsed.hash = '';
-        normalizedUrl = parsed.toString();
+      if (provider === 'tixcraft') {
+        const match = parsed.pathname.match(/^\/activity\/(?:detail|game)\/([^/]+)$/i);
+        if (match) {
+          parsed.pathname = `/activity/game/${match[1]}`;
+          parsed.search = '';
+          parsed.hash = '';
+          normalizedUrl = parsed.toString();
+        }
+      } else if (provider === 'ticketplus') {
+        const match = parsed.pathname.match(/^\/activity\/([^/]+)\/?$/i);
+        if (match) {
+          parsed.pathname = `/activity/${match[1]}`;
+          parsed.search = '';
+          parsed.hash = '';
+          normalizedUrl = parsed.toString();
+        }
       }
     } catch (e) {}
+
     const old = await env.DB.prepare('SELECT id FROM subscriptions WHERE line_user_id=? AND event_url=?').bind(userId, normalizedUrl).first();
     const id = old?.id || crypto.randomUUID();
-    await env.DB.prepare("INSERT INTO subscriptions (id,line_user_id,provider,event_url) VALUES (?,?,'tixcraft',?) ON CONFLICT(line_user_id,event_url) DO UPDATE SET enabled=1,updated_at=CURRENT_TIMESTAMP").bind(id, userId, normalizedUrl).run();
+    await env.DB.prepare('INSERT INTO subscriptions (id,line_user_id,provider,event_url) VALUES (?,?,?,?) ON CONFLICT(line_user_id,event_url) DO UPDATE SET enabled=1,updated_at=CURRENT_TIMESTAMP').bind(id, userId, provider, normalizedUrl).run();
     return `已開始監控。\n訂閱 ID：${id}`;
   }
   if (value.startsWith('立即檢查 ')) {

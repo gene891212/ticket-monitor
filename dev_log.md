@@ -294,3 +294,48 @@
   - 每次輪詢後加入 `+/- 15%` 的隨機時間抖動（以 15 秒為例，變動於 12.75 到 17.25 秒之間），打亂特徵，躲避 WAF 的規律頻率偵測。
 - **整合測試對齊**：
   - 重構 [tixcraft.integration.test.ts](file:///d:/code/ticket-monitor/src/providers/tixcraft.integration.test.ts) 中的 Check #1 與 Check #2 以配合「常駐瀏覽器」性能對比（驗證第二次頁面讀取因無啟動進程開銷而大幅加快）。
+
+---
+
+## 2026-07-18 #14 — TicketPlus 售票系統整合與本地 AES 解密實作
+
+**討論主題**：新增對 TicketPlus (遠大售票) 系統的監控支援，並透過逆向解密與直接 API 請求實現極致輕量的輪詢。
+
+### 需求範圍與實作機制
+- **網址相容**：網域名稱匹配 `ticketplus.com.tw`，路徑格式嚴格匹配 `/activity/<UUID>`（相容結尾斜線）。
+- **本地 AES-128-CBC 解密**：
+  - 經分析前端 JS 資源包，解鎖了 TicketPlus 的 ID 轉換邏輯。公開 UUID 實為內部順序 ID (eventId) 與場次 UUID (sessionId) 加密後的 Hex 字串。
+  - 金鑰 (Key) 為 `ILOVEFETIXFETIX!`，IV 為 `!@#$FETIXEVENTiv`，演算法為 `aes-128-cbc`。
+  - 本地端直接解密，無須額外的請求或瀏覽器動作即可獲得內部 ID，極其省時（解密過程 < 1ms）。
+- **輕量化 API 直接輪詢**：
+  - 抓取場次資訊：`https://apis.ticketplus.com.tw/config/api/v1/getS3?path=event/${eventUuid}/sessions.json`
+  - 批次取得票況：`https://apis.ticketplus.com.tw/config/api/v1/get?eventId=${eventId}&sessionId=${sessionIds}`
+  - 比起 Tixcraft 的 Playwright 方案，TicketPlus 僅需兩次並行 fetch 與一個 status GET 請求，單次檢查僅耗時 100~300ms，對 Monitor 的資源開銷幾近於零。
+
+### 逆向工程與 API 破解分析歷程
+由於 TicketPlus 前端與 API 之間存在 ID 混淆機制，以下為分析並重構該邏輯的解密歷程：
+1. **網路請求嗅探 (Network Sniffing)**：
+   - 藉由 Playwright 截獲網頁請求，發現在網頁載入後，會向 `https://apis.ticketplus.com.tw/config/api/v1/get?eventId=e000001412&sessionId=s000002092` 發送票況請求。
+   - 然而，`e000001412`（活動 ID）與 `s000002092`（場次 ID）在 `event.json` 及 `sessions.json` 中皆不存在（僅有公開的 UUID `4b47b536...` 與 `8bd271d3...`）。此特徵代表前端 JS 具備本地 ID 轉換機制。
+2. **定位加密模組**：
+   - 在下載的前端 `app.js` 靜態資源中，搜尋 `/api/v1/get` 與 `eventId` 關鍵字，定位到轉換函式 `Object(a["a"])(e)`。
+   - 進一步追查變數 `a`（Webpack 模組代碼 `9263`），發現其使用內置的金鑰與 `crypto` 模組進行加解密：
+     - **演算法**：`aes-128-cbc`
+     - **金鑰 (Key)**：`ILOVEFETIXFETIX!`
+     - **初始向量 (IV)**：`!@#$FETIXEVENTiv`
+     - 解密方法為傳入十六進位 (Hex) 格式的 UUID，解密後調用 `toString()` 還原出明文順序 ID。
+3. **本地移植驗證**：
+   - 經使用 Node.js 原生 `crypto` 模組與此 Key/IV 對 `4b47b536...` 進行解密，成功產出 `e000001412`。
+   - 至此完整還原出整個 API 邏輯，讓我們得以擺脫 headless 瀏覽器，改以純 HTTP Fetch 秒級輪詢。
+
+### Cloudflare Worker 端與專案變更
+- **Worker 訂閱相容**：修改 [index.js](file:///d:/code/ticket-monitor/cloudflare-worker/src/index.js)，新增 `isTicketplus(url)` 驗證與網址正規化邏輯，更新 `訂閱` 命令處理器以動態將正確的 `provider`（`'ticketplus'`）寫入 SQLite D1 資料庫中。
+- **部署指令整合**：在 [package.json](file:///d:/code/ticket-monitor/package.json) 中加入 `"worker:deploy": "npx wrangler deploy --config cloudflare-worker/wrangler.jsonc"`，便於從根目錄使用通用性最高的 `npx` 部署或更新 Worker。
+
+### 驗證結果
+- **單元測試**：在 [ticketplus.test.ts](file:///d:/code/ticket-monitor/src/providers/ticketplus.test.ts) 中加入 supports、decryption 及 check 模擬測試，100% 通過。
+- **實地輪詢測試**：
+  - 音田雅則 / Ave Mujica / EMI NODA 演唱會：回傳 `available` (🟢)。
+  - back number / TREASURE / YUURI 演唱會：回傳 `unavailable` (已截止/售完/pending，❌)。
+- 所有測試與 live 偵測均完美運作，且順利整合入 monitor 核心。
+
