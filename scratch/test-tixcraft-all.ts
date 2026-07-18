@@ -50,14 +50,16 @@ async function testMode(name: string, filename: string, launchOptions: any, cont
     console.log(`Screenshot saved to: ${screenshotPath}`);
 
     const bodyText = await page.locator('body').innerText();
-    const isCloudflareBlocked = bodyText.includes('Attention Required') || 
-                                bodyText.includes('Cloudflare') || 
-                                bodyText.includes('Just a moment') ||
-                                finalTitle.includes('Cloudflare') ||
-                                finalTitle.includes('Just a moment') ||
-                                response?.status() === 403;
+    const isBlocked = bodyText.includes('Attention Required') || 
+                      bodyText.includes('Cloudflare') || 
+                      bodyText.includes('Just a moment') ||
+                      bodyText.includes('Your Browsing Activity Has Been Paused') ||
+                      bodyText.includes("Let's Get Your Identity Verified") ||
+                      finalTitle.includes('Cloudflare') ||
+                      finalTitle.includes('Just a moment') ||
+                      response?.status() === 403;
     
-    console.log(`Cloudflare challenge detected? ${isCloudflareBlocked ? 'YES ❌' : 'NO  (Success!)'}`);
+    console.log(`WAF / Bot challenge detected? ${isBlocked ? 'YES ❌' : 'NO  (Success!)'}`);
     console.log('Body snippet (first 150 chars):', bodyText.trim().slice(0, 150).replace(/\s+/g, ' '));
   } catch (error: any) {
     console.error(`Error in ${name}:`, error.message);

@@ -3,8 +3,9 @@ import { TixcraftProvider } from './tixcraft.js';
 import { chromium } from 'playwright';
 
 async function getFirstActiveEventUrl(): Promise<string> {
+  const fallbackUrl = 'https://tixcraft.com/activity/detail/26_echo';
   const browser = await chromium.launch({
-    headless: true,
+    headless: process.env.PLAYWRIGHT_HEADLESS === 'true',
     args: ['--disable-blink-features=AutomationControlled'],
   });
   try {
@@ -26,14 +27,18 @@ async function getFirstActiveEventUrl(): Promise<string> {
     if (uniqueHrefs.length > 0) {
       return uniqueHrefs[0];
     }
-    throw new Error('No active events found on Tixcraft homepage');
+    console.warn('No active events found on homepage, using fallback URL:', fallbackUrl);
+    return fallbackUrl;
+  } catch (err: any) {
+    console.warn('Failed to dynamically retrieve event URL, using fallback URL:', fallbackUrl, err.message);
+    return fallbackUrl;
   } finally {
     await browser.close();
   }
 }
 
 describe('TixcraftProvider Integration Test', () => {
-  it('successfully fetches and parses active event ticket table using cookie caching', async () => {
+  it('successfully fetches and parses active event ticket table using a persistent browser context', async () => {
     const provider = new TixcraftProvider();
     
     // 1. Get an active event URL dynamically from the homepage
@@ -41,8 +46,8 @@ describe('TixcraftProvider Integration Test', () => {
     const eventUrl = await getFirstActiveEventUrl();
     console.log(`Testing with URL: ${eventUrl}`);
 
-    // 2. Perform the first check (should launch Playwright to fetch cookies, then request using fetch)
-    console.log('\n--- Running CHECK #1 (Cookie Acquisition + Fetch) ---');
+    // 2. Perform the first check (should launch the browser process)
+    console.log('\n--- Running CHECK #1 (Browser Initialization + Navigation) ---');
     const start1 = Date.now();
     const result1 = await provider.check(eventUrl);
     const duration1 = Date.now() - start1;
@@ -52,12 +57,12 @@ describe('TixcraftProvider Integration Test', () => {
     const sessions1 = result1.sessions ?? [];
     console.log('Check #1 Sessions Count:', sessions1.length);
 
-    expect(result1.status).not.toBe('unknown'); // If WAF blocked us, status would be unknown due to fallback or WAF errors
+    expect(result1.status).not.toBe('unknown');
     expect(result1.eventName).toBeDefined();
     expect(sessions1.length).toBeGreaterThan(0);
 
-    // 3. Perform the second check (should use cached cookies directly, bypass browser launch)
-    console.log('\n--- Running CHECK #2 (Cached Cookie Fetch) ---');
+    // 3. Perform the second check (should reuse the active browser process, only open/close page)
+    console.log('\n--- Running CHECK #2 (Reusing Persistent Browser Context) ---');
     const start2 = Date.now();
     const result2 = await provider.check(eventUrl);
     const duration2 = Date.now() - start2;
@@ -71,7 +76,7 @@ describe('TixcraftProvider Integration Test', () => {
     expect(result2.eventName).toBe(result1.eventName);
     expect(sessions2.length).toBe(sessions1.length);
 
-    // Check #2 must be significantly faster than Check #1 because it doesn't spin up Playwright
+    // Check #2 must be significantly faster than Check #1 because it doesn't spin up a new Playwright browser process
     console.log(`Performance comparison: Check #1 (${duration1}ms) vs Check #2 (${duration2}ms)`);
     expect(duration2).toBeLessThan(duration1);
   }, 90000); // Set a generous 90 seconds timeout for browser navigation and network fetches

@@ -270,3 +270,27 @@
 - **訂閱端自動標準化**：修改了 [index.js](file:///d:/code/ticket-monitor/cloudflare-worker/src/index.js) 中的 `訂閱` 命令邏輯。當使用者輸入 `detail` 或 `game` 網址時，Worker 在存入 D1 前會自動將其標準化轉換為 `/activity/game/...` 格式。
 - **資料庫舊資料清洗**：執行了 SQL 更新指令，將 D1 資料庫中所有已訂閱的歷史紀錄（共 3 筆）的 `event_url` 中的 `/activity/detail/` 全部替換為 `/activity/game/`。
 - **重新部署 Worker**：成功部署新版的 Worker，確保所有對外推送通知的「前往購票」連結都指向高效的 `game` 頁面。
+
+---
+
+## 2026-07-18 #13 — 拓元 WAF 防禦重構與持久化瀏覽器上下文、Poll 隨機化抖動
+
+**討論主題**：解決本機開啟 `pnpm dev` 時，因 Node 原生 `fetch` 被 AWS WAF 指紋封鎖而頻繁彈出/關閉多個 Playwright 瀏覽器視窗的問題。
+
+### 實作內容
+- **完全停用原生 `fetch` 抓取**：Node.js 原生 `fetch` 的 TLS 握手特徵（JA3/JA4）易被拓元 AWS WAF 直接標記為 Bot。為防 IP 被集體拉黑，全面移除 `fetchWithCookies` 與手動 Cookie 快取更新邏輯。
+- **持久化常駐瀏覽器與分頁 (Persistent Browser & Single Tab)**：
+  - 重構 [tixcraft.ts](file:///d:/code/ticket-monitor/src/providers/tixcraft.ts) 改為常駐的單一 Playwright 瀏覽器與單一固定分頁 (`this.mainPage`)。
+  - 當需要檢查多個訂閱時，直接在原分頁利用 `goto` 進行原地跳轉，完全避免以前因為「關閉最後一個分頁 (Tab) 會導致瀏覽器視窗自動關閉」而造成的視窗反覆開關閃爍。
+  - 當瀏覽器或分頁被使用者不小心關閉時，藉由 `isConnected()` 及 `isClosed()` 自動檢測並自癒重新開啟。
+- **首頁預熱機制 (Context Warmup)**：
+  - WAF 對於直接進入購票深層頁面（`/activity/game/*`）的請求會有嚴格的 referrer 驗證。
+  - 在瀏覽器上下文啟動時，先開啟分頁模擬人類訪問拓元首頁並等待 3 秒再關閉，替該 Context 建立合法的基礎 WAF 會話。
+- **診斷工具精度升級**：
+  - 更新了 [test-tixcraft-all.ts](file:///d:/code/ticket-monitor/scratch/test-tixcraft-all.ts)，加入對 AWS WAF 401 阻擋標題與空白頁面內容的檢測。
+  - 建立 [test-persistent-browser.ts](file:///d:/code/ticket-monitor/scratch/test-persistent-browser.ts) 驗證持久化分頁防禦成效。
+- **輪詢隨機抖動 (Randomized Jitter)**：
+  - 將 [index.ts](file:///d:/code/ticket-monitor/src/index.ts) 中的固定 `setInterval` 定時器改為遞迴 `setTimeout` 輪詢。
+  - 每次輪詢後加入 `+/- 15%` 的隨機時間抖動（以 15 秒為例，變動於 12.75 到 17.25 秒之間），打亂特徵，躲避 WAF 的規律頻率偵測。
+- **整合測試對齊**：
+  - 重構 [tixcraft.integration.test.ts](file:///d:/code/ticket-monitor/src/providers/tixcraft.integration.test.ts) 中的 Check #1 與 Check #2 以配合「常駐瀏覽器」性能對比（驗證第二次頁面讀取因無啟動進程開銷而大幅加快）。
