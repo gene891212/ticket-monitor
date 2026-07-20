@@ -359,4 +359,24 @@
 - **測試全部通過**：執行 `pnpm test`，所有 16 個單元與整合測試全數成功通過。在執行測試過程中，針對 Local 環境缺少的 Playwright 二進位檔，自動執行了 `pnpm exec playwright install chromium` 完成環境補件。
 - **Wrangler 打包成功**：執行 `npx wrangler deploy --dry-run` 驗證打包，Wrangler (esbuild) 成功跨目錄打包 TypeScript 規則檔，編譯後的總大小為 **15.35 KiB**，證明無多餘的 Node 重型套件被意外打包，完全符合輕量化預期。
 
+## 2026-07-21 #16 — 修正 TicketPlus 抓不到標題問題與「我的訂閱」排版調整
 
+**討論主題**：修正 TicketPlus 訂閱活動於 LINE 機器人中「我的訂閱」指令不顯示標題（而顯示 URL）之問題，並重新排版訂閱列表的呈現。
+
+### 實作機制與問題修復
+- **D1 訂閱資料庫標題同步**：
+  - 經分析，即使本地 Monitor 在爬取完 TicketPlus 後，回報的 `eventName` 正確無誤，但雲端 Cloudflare Worker 接收報告的 API 介面 `saveReport` 僅更新了 `subscription_sessions` 資料表，遺漏了將 `report.eventName` 更新回 `subscriptions.event_name` 欄位的邏輯，使得 `event_name` 一直為 `NULL`。
+  - 修改 `cloudflare-worker/src/index.ts` 中的 `saveReport` 函數，在接收到含有 `report.eventName` 的資料時，自動執行 `UPDATE subscriptions SET event_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`。
+- **「我的訂閱」指令呈現優化**：
+  - 依照使用者偏好，將 LINE Webhook 的「我的訂閱」回覆格式改為簡潔純文字標籤形式，依序呈現：
+    ```text
+    標題：xxx
+    網址：xxx
+    ID：xxx
+    場次資訊：
+    • xxx
+    ```
+
+### 驗證結果
+- **測試驗證**：本地 `pnpm test` (包含模擬測試與 Tixcraft 實體 Playwright 測試共 16 案) 100% 通過。
+- **Wrangler 打包編譯**：本地打包 `npx wrangler deploy --dry-run` 通過。

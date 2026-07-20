@@ -37,3 +37,10 @@ CREATE TABLE IF NOT EXISTS system_status (
     • 爬蟲狀態：🟢 正常 / ⚠️ 異常
     • 錯誤資訊：[最後錯誤訊息 (如有)]
     ```
+
+## 開發工作流規範 (Development Workflow Rules)
+
+### 1. Commit 前撰寫開發日誌
+* **規範原則**：每次在對專案程式碼進行 `git commit` 前，**必須**先將該次變更的主題、實作機制、發現的問題與分析、以及驗證結果，記錄到專案根目錄的 `dev_log.md` 中。
+* **Commit 內容對齊**：確保每次 Commit 時，該 Commit 內同時包含程式碼變更與在 `dev_log.md` 中對應的日誌記錄，使歷史紀錄自帶完整的文件說明。
+
