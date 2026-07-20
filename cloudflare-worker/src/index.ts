@@ -1,15 +1,18 @@
-const API = 'https://api.line.me/v2/bot/message';
-const response = (body, status = 200) => new Response(body, { status });
-const json = (body, status = 200) => Response.json(body, { status });
-const authorized = (request, env) => env.WORKER_API_TOKEN && request.headers.get('authorization') === `Bearer ${env.WORKER_API_TOKEN}`;
+import { ruleForUrl } from '../../src/providers/rules.js';
 
-async function signature(raw, value, secret) {
+const API = 'https://api.line.me/v2/bot/message';
+const response = (body: string, status = 200) => new Response(body, { status });
+const json = (body: any, status = 200) => Response.json(body, { status });
+const authorized = (request: Request, env: any) => env.WORKER_API_TOKEN && request.headers.get('authorization') === `Bearer ${env.WORKER_API_TOKEN}`;
+
+async function signature(raw: string, value: string | null, secret: string | undefined): Promise<boolean> {
   if (!value || !secret) return false;
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const bytes = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(raw));
   return btoa(String.fromCharCode(...new Uint8Array(bytes))) === value;
 }
-async function line(env, path, body) {
+
+async function line(env: any, path: string, body: any): Promise<void> {
   const r = await fetch(`${API}/${path}`, { method: 'POST', headers: { authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) {
     const detail = await r.text().catch(() => '');
@@ -17,18 +20,16 @@ async function line(env, path, body) {
     throw new Error(`LINE API HTTP ${r.status}: ${detail}`);
   }
 }
-function isTixcraft(value) { try { return new URL(value).hostname.endsWith('tixcraft.com'); } catch { return false; } }
-function isTicketplus(value) { try { const url = new URL(value); return url.hostname === 'ticketplus.com.tw' || url.hostname.endsWith('.ticketplus.com.tw'); } catch { return false; } }
 
-async function saveReport(request, env, subscriptionId) {
+async function saveReport(request: Request, env: any, subscriptionId: string): Promise<Response> {
   if (!authorized(request, env)) return response('Unauthorized', 401);
   const subscription = await env.DB.prepare('SELECT line_user_id,event_url FROM subscriptions WHERE id=? AND enabled=1').bind(subscriptionId).first();
   if (!subscription) return response('Not found', 404);
-  const report = await request.json();
+  const report = await request.json() as any;
   const manual = report.manualRequestId
     ? await env.DB.prepare("SELECT id,line_user_id,reply_token FROM manual_check_requests WHERE id=? AND subscription_id=? AND status='claimed'").bind(report.manualRequestId, subscriptionId).first()
     : null;
-  const newlyAvailable = [];
+  const newlyAvailable: any[] = [];
   for (const session of report.sessions ?? []) {
     const old = await env.DB.prepare('SELECT last_notified_status FROM subscription_sessions WHERE subscription_id=? AND session_key=?').bind(subscriptionId, session.key).first();
     await env.DB.prepare(`INSERT INTO subscription_sessions (subscription_id,session_key,session_date_time,session_name,session_venue,last_status,last_notified_status)
@@ -46,13 +47,13 @@ async function saveReport(request, env, subscriptionId) {
     const details = newlyAvailable.map((item) => `• ${item.dateTime}｜${item.venue}`).join('\n');
     console.log('[PUSH] auto_available', JSON.stringify({ subscriptionId, userId: subscription.line_user_id, sessions: newlyAvailable.map((s) => ({ key: s.key, dateTime: s.dateTime })) }));
     await line(env, 'push', { to: subscription.line_user_id, messages: [{ type: 'text', text: `🎫 有可購買場次\n${title}\n${details}\n\n前往購票：${subscription.event_url}` }] });
-    await env.DB.batch(newlyAvailable.map((item) => env.DB.prepare('UPDATE subscription_sessions SET last_notified_status=? WHERE subscription_id=? AND session_key=?').bind('available', subscriptionId, item.key)));
+    await env.DB.batch(newlyAvailable.map((item: any) => env.DB.prepare('UPDATE subscription_sessions SET last_notified_status=? WHERE subscription_id=? AND session_key=?').bind('available', subscriptionId, item.key)));
   }
   if (manual) {
-    const available = (report.sessions ?? []).filter((item) => item.status === 'available');
+    const available = (report.sessions ?? []).filter((item: any) => item.status === 'available');
     const title = report.eventName ?? report.sessions?.[0]?.name ?? '活動';
     const resultText = available.length
-      ? `🔎 手動檢查完成\n${title}\n${available.map((item) => `• ${item.dateTime}｜${item.venue}`).join('\n')}\n\n目前有可購買場次：${subscription.event_url}`
+      ? `🔎 手動檢查完成\n${title}\n${available.map((item: any) => `• ${item.dateTime}｜${item.venue}`).join('\n')}\n\n目前有可購買場次：${subscription.event_url}`
       : `🔎 手動檢查完成\n${title}\n目前沒有可購買場次。`;
     if (manual.reply_token) {
       try {
@@ -65,13 +66,13 @@ async function saveReport(request, env, subscriptionId) {
       console.warn('[PUSH] manual_no_reply_token', JSON.stringify({ manualId: manual.id, subscriptionId, userId: manual.line_user_id }));
       await line(env, 'push', { to: manual.line_user_id, messages: [{ type: 'text', text: resultText }] });
     }
-    if (available.length) await env.DB.batch(available.map((item) => env.DB.prepare('UPDATE subscription_sessions SET last_notified_status=? WHERE subscription_id=? AND session_key=?').bind('available', subscriptionId, item.key)));
+    if (available.length) await env.DB.batch(available.map((item: any) => env.DB.prepare('UPDATE subscription_sessions SET last_notified_status=? WHERE subscription_id=? AND session_key=?').bind('available', subscriptionId, item.key)));
     await env.DB.prepare("UPDATE manual_check_requests SET status='completed',completed_at=CURRENT_TIMESTAMP WHERE id=?").bind(manual.id).run();
   }
   return json({ notified: newlyAvailable.length });
 }
 
-async function command(env, userId, value, replyToken) {
+async function command(env: any, userId: string, value: string, replyToken: string | null): Promise<string | null> {
   const help = '指令：\n訂閱 <活動網址>\n我的訂閱\n立即檢查 <訂閱 ID>\n取消 <訂閱 ID>';
   if (/^(help|說明|幫助)$/i.test(value)) return help;
   if (value === '我的訂閱') {
@@ -85,8 +86,8 @@ async function command(env, userId, value, replyToken) {
 
     if (!results || !results.length) return '目前沒有訂閱。';
 
-    const subsMap = new Map();
-    for (const row of results) {
+    const subsMap = new Map<string, any>();
+    for (const row of results as any[]) {
       if (!subsMap.has(row.id)) {
         subsMap.set(row.id, {
           id: row.id,
@@ -109,7 +110,7 @@ async function command(env, userId, value, replyToken) {
     for (const sub of subsMap.values()) {
       let subStr = `# ${sub.id}\n${sub.eventName || sub.eventUrl}`;
       if (sub.sessions.length) {
-        const sessionLines = sub.sessions.map((s) => {
+        const sessionLines = sub.sessions.map((s: any) => {
           const statusIcon = s.status === 'available' ? '🟢 有票' : s.status === 'unavailable' ? '❌ 售完' : '❓ 未知';
           return `• ${s.dateTime}｜${s.venue}：${statusIcon}`;
         });
@@ -127,39 +128,23 @@ async function command(env, userId, value, replyToken) {
   }
   if (value.startsWith('訂閱 ')) {
     const eventUrl = value.slice(3).trim();
-    let provider = '';
-    if (isTixcraft(eventUrl)) {
-      provider = 'tixcraft';
-    } else if (isTicketplus(eventUrl)) {
-      provider = 'ticketplus';
-    } else {
+    const rule = ruleForUrl(eventUrl);
+    if (!rule) {
       return '請提供有效的 tixCraft 或 TicketPlus 活動網址。';
     }
+    const provider = rule.name;
 
     let normalizedUrl = eventUrl;
     try {
       const parsed = new URL(eventUrl);
-      if (provider === 'tixcraft') {
-        const match = parsed.pathname.match(/^\/activity\/(?:detail|game)\/([^/]+)$/i);
-        if (match) {
-          parsed.pathname = `/activity/game/${match[1]}`;
-          parsed.search = '';
-          parsed.hash = '';
-          normalizedUrl = parsed.toString();
-        }
-      } else if (provider === 'ticketplus') {
-        const match = parsed.pathname.match(/^\/activity\/([^/]+)\/?$/i);
-        if (match) {
-          parsed.pathname = `/activity/${match[1]}`;
-          parsed.search = '';
-          parsed.hash = '';
-          normalizedUrl = parsed.toString();
-        }
+      const normalized = rule.normalize(parsed);
+      if (normalized) {
+        normalizedUrl = normalized;
       }
     } catch (e) {}
 
     const old = await env.DB.prepare('SELECT id FROM subscriptions WHERE line_user_id=? AND event_url=?').bind(userId, normalizedUrl).first();
-    const id = old?.id || crypto.randomUUID();
+    const id = (old?.id as string | undefined) || crypto.randomUUID();
     await env.DB.prepare('INSERT INTO subscriptions (id,line_user_id,provider,event_url) VALUES (?,?,?,?) ON CONFLICT(line_user_id,event_url) DO UPDATE SET enabled=1,updated_at=CURRENT_TIMESTAMP').bind(id, userId, provider, normalizedUrl).run();
     return `已開始監控。\n訂閱 ID：${id}`;
   }
@@ -176,7 +161,7 @@ async function command(env, userId, value, replyToken) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request: Request, env: any): Promise<Response> {
     try {
       const url = new URL(request.url);
       if (request.method === 'GET' && url.pathname === '/healthz') return json({ ok: true });
@@ -188,13 +173,13 @@ export default {
         if (!authorized(request, env)) return response('Unauthorized', 401);
         await env.DB.prepare("UPDATE manual_check_requests SET status='pending',claimed_at=NULL WHERE status='claimed' AND claimed_at < datetime('now','-2 minutes')").run();
         const { results } = await env.DB.prepare("SELECT r.id,r.subscription_id AS subscriptionId,s.provider,s.event_url AS eventUrl,r.line_user_id AS lineUserId FROM manual_check_requests r JOIN subscriptions s ON s.id=r.subscription_id WHERE r.status='pending' AND s.enabled=1 ORDER BY r.created_at LIMIT 10").all();
-        if (results.length) await env.DB.batch(results.map((item) => env.DB.prepare("UPDATE manual_check_requests SET status='claimed',claimed_at=CURRENT_TIMESTAMP WHERE id=?").bind(item.id)));
+        if (results.length) await env.DB.batch((results as any[]).map((item) => env.DB.prepare("UPDATE manual_check_requests SET status='claimed',claimed_at=CURRENT_TIMESTAMP WHERE id=?").bind(item.id)));
         return json(results);
       }
       const failMatch = url.pathname.match(/^\/api\/manual-checks\/([^/]+)\/fail$/);
       if (request.method === 'POST' && failMatch) {
         if (!authorized(request, env)) return response('Unauthorized', 401);
-        const item = await env.DB.prepare("SELECT line_user_id,reply_token FROM manual_check_requests WHERE id=? AND status='claimed'").bind(failMatch[1]).first();
+        const item = await env.DB.prepare("SELECT line_user_id,reply_token FROM manual_check_requests WHERE id=? AND status='claimed'").bind(failMatch[1]).first() as any;
         if (item) {
           await env.DB.prepare("UPDATE manual_check_requests SET status='failed',completed_at=CURRENT_TIMESTAMP WHERE id=?").bind(failMatch[1]).run();
           const failText = '手動檢查失敗，請稍後再試。';
@@ -218,7 +203,7 @@ export default {
       const raw = await request.text();
       if (!await signature(raw, request.headers.get('x-line-signature'), env.LINE_CHANNEL_SECRET)) return response('Unauthorized', 401);
       const { events } = JSON.parse(raw);
-      await Promise.all(events.map(async (event) => {
+      await Promise.all((events as any[]).map(async (event) => {
         if (event.type !== 'message' || event.message?.type !== 'text' || !event.source?.userId) return;
         const message = await command(env, event.source.userId, event.message.text.trim(), event.replyToken);
         if (message) {
@@ -226,7 +211,7 @@ export default {
         }
       }));
       return response('OK');
-    } catch (err) {
+    } catch (err: any) {
       console.error('[WORKER ERROR]', err.message, err.stack);
       return json({ error: err.message, stack: err.stack }, 500);
     }

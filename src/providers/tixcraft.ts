@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import * as cheerio from 'cheerio';
 import type { CheckResult, TicketSession, TicketStatus } from '../types.js';
 import type { TicketProvider } from './base.js';
+import { TIXCRAFT_RULE } from './rules.js';
 
 type SessionRow = { dateTime: string; name: string; venue: string; purchaseState: string };
 
@@ -47,7 +48,7 @@ export class TixcraftProvider implements TicketProvider {
   private readonly cachedUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
   supports(url: URL) {
-    return url.hostname === 'tixcraft.com' || url.hostname.endsWith('.tixcraft.com');
+    return TIXCRAFT_RULE.supports(url);
   }
 
   async check(eventUrl: string): Promise<CheckResult> {
@@ -139,12 +140,10 @@ export class TixcraftProvider implements TicketProvider {
   }
 
   private toPurchaseUrl(rawUrl: string): string | undefined {
-    const url = new URL(rawUrl);
-    const match = url.pathname.match(/^\/activity\/(?:detail|game)\/([^/]+)$/);
-    if (!match) return undefined;
-    url.pathname = `/activity/game/${match[1]}`;
-    url.search = '';
-    url.hash = '';
-    return url.toString();
+    try {
+      return TIXCRAFT_RULE.normalize(new URL(rawUrl)) ?? undefined;
+    } catch {
+      return undefined;
+    }
   }
 }

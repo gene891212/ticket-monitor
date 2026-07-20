@@ -339,3 +339,24 @@
   - back number / TREASURE / YUURI 演唱會：回傳 `unavailable` (已截止/售完/pending，❌)。
 - 所有測試與 live 偵測均完美運作，且順利整合入 monitor 核心。
 
+---
+
+## 2026-07-21 #15 — 售票平台規則輕量化提取與 Cloudflare Worker TypeScript 重構 (Option 2 落地)
+
+**討論主題**：為了解決新增售票平台時，Worker 端必須重複撰寫硬編碼的網址驗證與正規化 Regex，以及多主機部署時的版本不對稱與重複爬取問題，正式實作「方案二：輕量化規則共用 (Wrangler TypeScript Bundle)」。
+
+### 實作機制與架構重構
+- **共用規則提取 (Shared Rules)**：
+  - 建立 [rules.ts](file:///d:/code/ticket-monitor/src/providers/rules.ts) 作為無 Playwright/Cheerio 依賴的純規則定義檔。
+  - 定義 `ProviderRule` 介面，實作 `TIXCRAFT_RULE` 與 `TICKETPLUS_RULE`。
+  - Local 監控端的 [tixcraft.ts](file:///d:/code/ticket-monitor/src/providers/tixcraft.ts) 與 [ticketplus.ts](file:///d:/code/ticket-monitor/src/providers/ticketplus.ts) 均重構為引用 `rules.ts`，確保邏輯單一化。
+- **Worker 升級 TypeScript**：
+  - 將舊有的 `cloudflare-worker/src/index.js` 刪除，重新命名並重構為 TypeScript 版本 [index.ts](file:///d:/code/ticket-monitor/cloudflare-worker/src/index.ts)。
+  - 在 Worker 中使用相對路徑引入 `rules.ts`，並使用 `ruleForUrl(eventUrl)` 和 `rule.normalize()` 代替原本硬編碼的 `isTixcraft`、`isTicketplus` 與手寫 Regex。
+  - 更新 [wrangler.jsonc](file:///d:/code/ticket-monitor/cloudflare-worker/wrangler.jsonc) 將 `main` 入口點指向 `src/index.ts`。
+
+### 驗證與結果
+- **測試全部通過**：執行 `pnpm test`，所有 16 個單元與整合測試全數成功通過。在執行測試過程中，針對 Local 環境缺少的 Playwright 二進位檔，自動執行了 `pnpm exec playwright install chromium` 完成環境補件。
+- **Wrangler 打包成功**：執行 `npx wrangler deploy --dry-run` 驗證打包，Wrangler (esbuild) 成功跨目錄打包 TypeScript 規則檔，編譯後的總大小為 **15.35 KiB**，證明無多餘的 Node 重型套件被意外打包，完全符合輕量化預期。
+
+

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { CheckResult, TicketSession, TicketStatus } from '../types.js';
 import type { TicketProvider } from './base.js';
+import { TICKETPLUS_RULE } from './rules.js';
 
 export class TicketplusProvider implements TicketProvider {
   readonly name = 'ticketplus' as const;
@@ -10,7 +11,7 @@ export class TicketplusProvider implements TicketProvider {
   private readonly cachedUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
   supports(url: URL): boolean {
-    return url.hostname === 'ticketplus.com.tw' || url.hostname.endsWith('.ticketplus.com.tw');
+    return TICKETPLUS_RULE.supports(url);
   }
 
   /**
