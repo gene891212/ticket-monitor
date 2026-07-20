@@ -26,6 +26,9 @@ async function saveReport(request: Request, env: any, subscriptionId: string): P
   const subscription = await env.DB.prepare('SELECT line_user_id,event_url FROM subscriptions WHERE id=? AND enabled=1').bind(subscriptionId).first();
   if (!subscription) return response('Not found', 404);
   const report = await request.json() as any;
+  if (report.eventName) {
+    await env.DB.prepare('UPDATE subscriptions SET event_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(report.eventName, subscriptionId).run();
+  }
   const manual = report.manualRequestId
     ? await env.DB.prepare("SELECT id,line_user_id,reply_token FROM manual_check_requests WHERE id=? AND subscription_id=? AND status='claimed'").bind(report.manualRequestId, subscriptionId).first()
     : null;
