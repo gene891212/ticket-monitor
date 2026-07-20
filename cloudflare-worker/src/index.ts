@@ -111,15 +111,15 @@ async function command(env: any, userId: string, value: string, replyToken: stri
 
     const messages = [];
     for (const sub of subsMap.values()) {
-      let subStr = `# ${sub.id}\n${sub.eventName || sub.eventUrl}`;
+      let subStr = `標題：${sub.eventName || '（尚未取得標題）'}\n網址：${sub.eventUrl}\nID：${sub.id}`;
       if (sub.sessions.length) {
         const sessionLines = sub.sessions.map((s: any) => {
           const statusIcon = s.status === 'available' ? '🟢 有票' : s.status === 'unavailable' ? '❌ 售完' : '❓ 未知';
           return `• ${s.dateTime}｜${s.venue}：${statusIcon}`;
         });
-        subStr += '\n' + sessionLines.join('\n');
+        subStr += '\n場次資訊：\n' + sessionLines.join('\n');
       } else {
-        subStr += '\n（尚未取得場次狀態，請稍候或執行立即檢查）';
+        subStr += '\n場次資訊：\n（尚未取得場次狀態，請稍候或執行立即檢查）';
       }
       messages.push(subStr);
     }
