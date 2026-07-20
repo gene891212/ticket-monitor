@@ -46,6 +46,20 @@ async function saveReport(request: Request, env: any, subscriptionId: string): P
       newlyAvailable.push(session);
     }
   }
+  // Clean up sessions that are no longer reported
+  if (report.sessions) {
+    const reportedKeys = report.sessions.map((s: any) => s.key);
+    if (reportedKeys.length > 0) {
+      const placeholders = reportedKeys.map(() => '?').join(',');
+      await env.DB.prepare(`DELETE FROM subscription_sessions WHERE subscription_id = ? AND session_key NOT IN (${placeholders})`)
+        .bind(subscriptionId, ...reportedKeys)
+        .run();
+    } else {
+      await env.DB.prepare(`DELETE FROM subscription_sessions WHERE subscription_id = ?`)
+        .bind(subscriptionId)
+        .run();
+    }
+  }
   if (newlyAvailable.length && !manual) {
     const title = report.eventName ?? newlyAvailable[0].name;
     const details = newlyAvailable.map((item) => `• ${item.dateTime}｜${item.venue}`).join('\n');
@@ -113,14 +127,14 @@ async function command(env: any, userId: string, value: string, replyToken: stri
 
     const messages = [];
     for (const sub of subsMap.values()) {
-      let subStr = `標題：${sub.eventName || '（尚未取得標題）'}\n網址：${sub.eventUrl}\nID：${sub.id}`;
+      let subStr = `${sub.eventName || '（尚未取得標題）'}\n${sub.eventUrl}\n${sub.id}`;
       if (sub.sessions.length) {
         const sessionLines = sub.sessions.map((s: any) => {
           const statusIcon = s.status === 'available'
             ? '🟢 有票'
             : s.status === 'unavailable'
               ? '❌ 售完'
-              : `❓ ${s.statusName || '未知'}`;
+              : `⚠️ ${s.statusName || '未知'}`;
           return `• ${s.dateTime}｜${s.venue}：${statusIcon}`;
         });
         subStr += '\n場次資訊：\n' + sessionLines.join('\n');

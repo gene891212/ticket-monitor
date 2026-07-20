@@ -405,3 +405,24 @@
 - **測試通過**：執行 `pnpm test`，所有 16 個單元與整合測試順利 100% 通過。
 - **Worker 部署**：完成 `pnpm worker:deploy`，成功將最新版程式部署至 Cloudflare。
 
+---
+
+## 2026-07-21 #18 — D1 場次下架清除機制、LINE 格式簡化與 Emoji 調整
+
+**討論主題**：處理網站已刪除場次（但 D1 仍殘留）導致顯示數量不合的問題，並優化 LINE 機器人的訂閱清單輸出排版與狀態 Emoji。
+
+### 實作機制
+1. **D1 資料庫場次下架清除機制**：
+   - 於 [index.ts](file:///d:/code/ticket-monitor/cloudflare-worker/src/index.ts) 的 `saveReport` 函式中，當收到最新檢查報告時，比對當前網頁上最新的 `session_key` 列表。
+   - 使用 `DELETE FROM subscription_sessions WHERE subscription_id = ? AND session_key NOT IN (...)`，自動從資料庫中刪除已經不存在於售票網頁上的過期場次（如大巨蛋已被下架的舊場次）。
+2. **LINE 「我的訂閱」回覆格式簡化**：
+   - 移除 `我的訂閱` 中各訂閱項目原有的 `標題：`、`網址：`、`ID：` 等贅字標籤，使整體排版直接清晰。
+3. **Git 環境清理**：
+   - 更新 [.gitignore](file:///d:/code/ticket-monitor/.gitignore)，加入 `.wrangler/` 與 `**/.wrangler/` 忽略設定，防止本機開發產生的 wrangler 快取檔案污染 git status。
+
+### 驗證結果
+- **測試驗證**：本地 `pnpm test` 通過。
+- **資料庫手動修復**：已手動清除 D1 資料庫中 Aespa 大巨蛋已下架的場次，經測試「我的訂閱」已正確僅顯示 2 個活動場次。
+- **部署狀態**：修改皆已部署至 Cloudflare 雲端，程式於本地保留為**未提交（Uncommitted）**狀態供使用者測試。
+
+
