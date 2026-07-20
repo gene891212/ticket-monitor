@@ -23,9 +23,11 @@ await pool.query(`
     session_name TEXT NOT NULL,
     session_venue TEXT NOT NULL,
     last_status TEXT NOT NULL DEFAULT 'unknown',
+    last_status_name TEXT,
     last_notified_status TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (subscription_id, session_key)
   );
+  ALTER TABLE subscription_sessions ADD COLUMN IF NOT EXISTS last_status_name TEXT;
 `);
 await pool.end();

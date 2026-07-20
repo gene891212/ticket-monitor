@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS subscription_sessions (
   session_name TEXT NOT NULL,
   session_venue TEXT NOT NULL,
   last_status TEXT NOT NULL DEFAULT 'unknown',
+  last_status_name TEXT,
   last_notified_status TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (subscription_id, session_key),

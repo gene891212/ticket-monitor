@@ -10,9 +10,12 @@ const sessionCache = new Map<string, TicketSession[]>();
 export function hasStatusChanged(prev: TicketSession[] | undefined, next: TicketSession[]): boolean {
   if (!prev) return true;
   if (prev.length !== next.length) return true;
-  const prevMap = new Map(prev.map((s) => [s.key, s.status]));
+  const prevMap = new Map(prev.map((s) => [s.key, s]));
   for (const session of next) {
-    if (prevMap.get(session.key) !== session.status) return true;
+    const prevSession = prevMap.get(session.key);
+    if (!prevSession) return true;
+    if (prevSession.status !== session.status) return true;
+    if (prevSession.statusName !== session.statusName) return true;
   }
   return false;
 }

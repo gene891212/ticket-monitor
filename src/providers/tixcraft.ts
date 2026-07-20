@@ -23,6 +23,7 @@ export function sessionsFromRows(rows: SessionRow[]): TicketSession[] {
     name: row.name,
     venue: row.venue,
     status: sessionStatus(row.purchaseState),
+    statusName: row.purchaseState.trim(),
   }));
 }
 

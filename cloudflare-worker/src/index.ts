@@ -35,11 +35,12 @@ async function saveReport(request: Request, env: any, subscriptionId: string): P
   const newlyAvailable: any[] = [];
   for (const session of report.sessions ?? []) {
     const old = await env.DB.prepare('SELECT last_notified_status FROM subscription_sessions WHERE subscription_id=? AND session_key=?').bind(subscriptionId, session.key).first();
-    await env.DB.prepare(`INSERT INTO subscription_sessions (subscription_id,session_key,session_date_time,session_name,session_venue,last_status,last_notified_status)
-      VALUES (?,?,?,?,?,?,?) ON CONFLICT(subscription_id,session_key) DO UPDATE SET
+    await env.DB.prepare(`INSERT INTO subscription_sessions (subscription_id,session_key,session_date_time,session_name,session_venue,last_status,last_status_name,last_notified_status)
+      VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(subscription_id,session_key) DO UPDATE SET
         session_date_time=excluded.session_date_time,session_name=excluded.session_name,session_venue=excluded.session_venue,last_status=excluded.last_status,
+        last_status_name=excluded.last_status_name,
         last_notified_status=CASE WHEN excluded.last_status='available' THEN subscription_sessions.last_notified_status ELSE excluded.last_status END,
-        updated_at=CURRENT_TIMESTAMP`).bind(subscriptionId, session.key, session.dateTime, session.name, session.venue, session.status, null).run();
+        updated_at=CURRENT_TIMESTAMP`).bind(subscriptionId, session.key, session.dateTime, session.name, session.venue, session.status, session.statusName ?? null, null).run();
     if (session.status === 'available' && old?.last_notified_status !== 'available') {
       console.log('[STATE] session will trigger push', JSON.stringify({ subscriptionId, sessionKey: session.key, newStatus: session.status, oldNotified: old?.last_notified_status ?? null, isNewRecord: !old }));
       newlyAvailable.push(session);
@@ -80,7 +81,7 @@ async function command(env: any, userId: string, value: string, replyToken: stri
   if (/^(help|說明|幫助)$/i.test(value)) return help;
   if (value === '我的訂閱') {
     const { results } = await env.DB.prepare(`
-      SELECT s.id, s.event_name, s.event_url, ss.session_date_time, ss.session_name, ss.session_venue, ss.last_status
+      SELECT s.id, s.event_name, s.event_url, ss.session_date_time, ss.session_name, ss.session_venue, ss.last_status, ss.last_status_name
       FROM subscriptions s
       LEFT JOIN subscription_sessions ss ON s.id = ss.subscription_id
       WHERE s.line_user_id = ? AND s.enabled = 1
@@ -104,7 +105,8 @@ async function command(env: any, userId: string, value: string, replyToken: stri
           dateTime: row.session_date_time,
           name: row.session_name,
           venue: row.session_venue,
-          status: row.last_status
+          status: row.last_status,
+          statusName: row.last_status_name
         });
       }
     }
@@ -114,7 +116,11 @@ async function command(env: any, userId: string, value: string, replyToken: stri
       let subStr = `標題：${sub.eventName || '（尚未取得標題）'}\n網址：${sub.eventUrl}\nID：${sub.id}`;
       if (sub.sessions.length) {
         const sessionLines = sub.sessions.map((s: any) => {
-          const statusIcon = s.status === 'available' ? '🟢 有票' : s.status === 'unavailable' ? '❌ 售完' : '❓ 未知';
+          const statusIcon = s.status === 'available'
+            ? '🟢 有票'
+            : s.status === 'unavailable'
+              ? '❌ 售完'
+              : `❓ ${s.statusName || '未知'}`;
           return `• ${s.dateTime}｜${s.venue}：${statusIcon}`;
         });
         subStr += '\n場次資訊：\n' + sessionLines.join('\n');

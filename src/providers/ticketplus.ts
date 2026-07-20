@@ -3,6 +3,18 @@ import type { CheckResult, TicketSession, TicketStatus } from '../types.js';
 import type { TicketProvider } from './base.js';
 import { TICKETPLUS_RULE } from './rules.js';
 
+function ticketplusStatusName(statusVal: string): string {
+  switch (statusVal) {
+    case 'onsale': return '立即訂購';
+    case 'pending': return '尚未開賣';
+    case 'soldout': return '已售完';
+    case 'over':
+    case 'end':
+      return '已結束';
+    default: return statusVal;
+  }
+}
+
 export class TicketplusProvider implements TicketProvider {
   readonly name = 'ticketplus' as const;
 
@@ -104,7 +116,7 @@ export class TicketplusProvider implements TicketProvider {
         let ticketStatus: TicketStatus = 'unknown';
         if (statusVal === 'onsale') {
           ticketStatus = 'available';
-        } else if (['pending', 'soldout', 'over', 'end'].includes(statusVal)) {
+        } else if (statusVal === 'soldout') {
           ticketStatus = 'unavailable';
         }
 
@@ -116,12 +128,13 @@ export class TicketplusProvider implements TicketProvider {
           dateTime: `${clean(s.date)} ${clean(s.time)}`.trim(),
           name: s.name || eventName || '未命名場次',
           venue: s.location || '未知地點',
-          status: ticketStatus
+          status: ticketStatus,
+          statusName: ticketplusStatusName(statusVal),
         };
       });
 
       const availableCount = sessions.filter(s => s.status === 'available').length;
-      const unavailableCount = sessions.filter(s => s.status === 'unavailable').length;
+      const unavailableCount = sessions.filter(s => s.status === 'unavailable' || s.status === 'unknown').length;
 
       let overallStatus: TicketStatus = 'unknown';
       let detail = '無法判定售票狀態';

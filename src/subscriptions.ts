@@ -26,17 +26,18 @@ export async function markNotified(id: string, status: TicketStatus) {
 export async function recordSession(subscriptionId: string, session: TicketSession): Promise<StoredSession> {
   const { rows } = await pool.query<StoredSession>(`
     INSERT INTO subscription_sessions (
-      subscription_id, session_key, session_date_time, session_name, session_venue, last_status
-    ) VALUES ($1, $2, $3, $4, $5, $6)
+      subscription_id, session_key, session_date_time, session_name, session_venue, last_status, last_status_name
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
     ON CONFLICT (subscription_id, session_key) DO UPDATE SET
       session_date_time = EXCLUDED.session_date_time,
       session_name = EXCLUDED.session_name,
       session_venue = EXCLUDED.session_venue,
       last_status = EXCLUDED.last_status,
+      last_status_name = EXCLUDED.last_status_name,
       updated_at = now()
     RETURNING session_key AS key, session_date_time AS "dateTime", session_name AS name,
-      session_venue AS venue, last_status AS status, last_notified_status
-  `, [subscriptionId, session.key, session.dateTime, session.name, session.venue, session.status]);
+      session_venue AS venue, last_status AS status, last_status_name AS "statusName", last_notified_status
+  `, [subscriptionId, session.key, session.dateTime, session.name, session.venue, session.status, session.statusName || null]);
   return rows[0];
 }
 

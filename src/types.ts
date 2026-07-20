@@ -7,6 +7,7 @@ export interface TicketSession {
   name: string;
   venue: string;
   status: TicketStatus;
+  statusName?: string;
 }
 
 export interface CheckResult {

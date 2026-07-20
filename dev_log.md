@@ -380,3 +380,28 @@
 ### 驗證結果
 - **測試驗證**：本地 `pnpm test` (包含模擬測試與 Tixcraft 實體 Playwright 測試共 16 案) 100% 通過。
 - **Wrangler 打包編譯**：本地打包 `npx wrangler deploy --dry-run` 通過。
+
+---
+
+## 2026-07-21 #17 — 支援場次原始狀態文字顯示與資料庫欄位新增
+
+**討論主題**：避免在 LINE 機器人「我的訂閱」或通知中對非有票/無票的狀態（例如暫停販售、尚未開賣、已結束）一律顯示為「未知」，改為顯示網頁上的原始狀態文字。
+
+### 實作機制
+1. **TicketSession 結構擴充**：
+   - 於 [types.ts](file:///d:/code/ticket-monitor/src/types.ts) 中，為 `TicketSession` 介面新增選填的 `statusName?: string` 屬性。
+2. **網頁原始狀態文字提取**：
+   - **Tixcraft**：在 [tixcraft.ts](file:///d:/code/ticket-monitor/src/providers/tixcraft.ts) 中，將 Cheerio 解析到的 `row.purchaseState` (如 `暫停販售`、`尚未開賣`) 設定給 `statusName`。
+   - **TicketPlus**：在 [ticketplus.ts](file:///d:/code/ticket-monitor/src/providers/ticketplus.ts) 中，新增狀態文字映射表 `ticketplusStatusName(statusVal)`，並重構狀態轉換邏輯：將 `pending` (尚未開賣)、`over` (已結束)、`end` (已結束) 對齊為系統的 `'unknown'` 狀態，並把其對應的中文狀態文字存入 `statusName`。
+3. **資料庫結構升級與寫入**：
+   - 本地端 PostgreSQL：在 [migrate.ts](file:///d:/code/ticket-monitor/src/db/migrate.ts) 中新增 `last_status_name` 欄位與 `ALTER TABLE` 自動升級邏輯；在 [subscriptions.ts](file:///d:/code/ticket-monitor/src/subscriptions.ts) 的 `recordSession` 更新 SQL 以將 `statusName` 寫入/更新至 `last_status_name`。
+   - 雲端 D1 SQLite：更新 [schema.sql](file:///d:/code/ticket-monitor/cloudflare-worker/schema.sql) 以同步結構；執行遠端資料庫變更 `ALTER TABLE subscription_sessions ADD COLUMN last_status_name TEXT;`。
+4. **Cloudflare Worker 狀態回傳格式優化**：
+   - 重構 [index.ts](file:///d:/code/ticket-monitor/cloudflare-worker/src/index.ts) 中的 `saveReport` 寫入 `last_status_name`，並在「我的訂閱」指令處理器中查詢此欄位。
+   - 若狀態為 `'unknown'`，顯示改為 `⚠️ ${s.statusName || '未知'}`，精準呈現網頁原文字。
+
+### 驗證結果
+- **資料庫升級**：成功對 remote Cloudflare D1 執行 `ALTER TABLE` 成功添加 `last_status_name` 欄位。
+- **測試通過**：執行 `pnpm test`，所有 16 個單元與整合測試順利 100% 通過。
+- **Worker 部署**：完成 `pnpm worker:deploy`，成功將最新版程式部署至 Cloudflare。
+
